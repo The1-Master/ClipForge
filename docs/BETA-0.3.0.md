@@ -108,6 +108,10 @@ with the release provides a consistency check; trust its source independently.
   obtained compatible helper. Importing downloaded demos and recording clips work.
 - Contributed raw demos remain in quarantine. Their isolated demo-to-example
   conversion worker is not enabled in this beta.
+- Full-demo contribution preparation accepts registered files inside the ClipForge
+  workspace. To contribute a demo stored elsewhere, first copy it into a subfolder
+  of your ClipForge installation and import that copy. Rendered clip contributions
+  already use registered outputs in the workspace.
 - GPU LoRA training has not passed the required backward/checkpoint pilot on the
   test PC. Storage headroom and the pilot must pass before training can run.
 - Detailed visual grounding is an operator CLI workflow; a keep rating alone is
