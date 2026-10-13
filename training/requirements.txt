@@ -1,0 +1,9 @@
+# Install AMD's tested ROCm PyTorch wheels separately; never fall back to a CUDA wheel.
+transformers==4.57.1
+peft==0.17.1
+accelerate==1.10.1
+safetensors==0.6.2
+huggingface-hub==0.35.3
+Pillow==11.3.0
+numpy==2.3.3
+

@@ -1,0 +1,12 @@
+[Unit]
+Description=ClipForge hourly private-data retention
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=120
+Persistent=true
+Unit=clipforge-maintain.service
+
+[Install]
+WantedBy=timers.target
+

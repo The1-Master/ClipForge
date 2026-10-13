@@ -1,0 +1,27 @@
+[Unit]
+Description=Expire ClipForge partial uploads and raw demos
+
+[Service]
+Slice=clipforge-ingest.slice
+Type=oneshot
+User=clipforge-ingest
+Group=clipforge-ingest
+WorkingDirectory=/opt/clipforge-ingest
+Environment=CLIPFORGE_DATA=/var/lib/clipforge-ingest
+Environment=PYTHONDONTWRITEBYTECODE=1
+LoadCredential=token-pepper:/etc/clipforge-ingest/token-pepper
+ExecStart=/opt/clipforge-ingest/venv/bin/python -m clipforge_ingest --maintain
+UMask=0077
+MemoryMax=128M
+CPUQuota=25%
+TasksMax=16
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/clipforge-ingest
+RestrictAddressFamilies=AF_UNIX
+

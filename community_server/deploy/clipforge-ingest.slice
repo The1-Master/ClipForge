@@ -1,0 +1,8 @@
+[Unit]
+Description=Shared resource budget for ClipForge ingest and retention
+
+[Slice]
+CPUQuota=25%
+MemoryMax=256M
+MemoryHigh=224M
+TasksMax=64

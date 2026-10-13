@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="330" height="80" viewBox="0 0 330 80">
+  <title>ClipForge — Your game. Your moments.</title>
+  <g transform="translate(4 8)">
+    <path fill="#FFB15A" fill-rule="evenodd" d="M18 10h25l9 9-11 8-5-5H23l-6 10 6 10h13l5-5 11 8-9 9H18L4 32 18 10Zm9 15v14l12-7-12-7Z"/>
+    <path fill="#67DEC0" d="m53 2 2.5 7.5L63 12l-7.5 2.5L53 22l-2.5-7.5L43 12l7.5-2.5L53 2Z"/>
+  </g>
+  <text x="84" y="42" fill="#F5F7FC" font-family="Inter,Segoe UI,sans-serif" font-size="32" font-weight="750" letter-spacing="-1.2">Clip<tspan fill="#FFB15A">Forge</tspan></text>
+  <text x="85" y="63" fill="#B2BDCF" font-family="Inter,Segoe UI,sans-serif" font-size="13">Your game. Your moments.</text>
+</svg>

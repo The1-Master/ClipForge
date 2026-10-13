@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import { createAutomationPoller } from '../src/studioState.ts';
+let resolve;
+let calls=0;
+const updates=[];
+const errors=[];
+const snapshot={gameOpen:false,queuePaused:false,activity:{busy:false}};
+const poll=createAutomationPoller(async force=>{calls++;assert.equal(force,true);return new Promise(done=>{resolve=done;});},value=>updates.push(value),error=>errors.push(error));
+const first=poll.refresh(true);
+const second=poll.refresh();
+assert.equal(first,second,'Overlapping refreshes share the pending read');
+assert.equal(calls,1);
+resolve(snapshot);
+await first;
+assert.deepEqual(updates,[snapshot]);
+poll.dispose();
+await poll.refresh();
+assert.equal(calls,1,'Disposed pollers never restart');
+
+let release;
+const late=createAutomationPoller(()=>new Promise(done=>{release=done;}),value=>updates.push(value),error=>errors.push(error));
+const pending=late.refresh();
+late.dispose();
+release({...snapshot,gameOpen:true});
+await pending;
+assert.equal(updates.length,1,'Late responses cannot publish after disposal');
+
+const failure=new Error('local status unavailable');
+const failing=createAutomationPoller(async()=>{throw failure;},value=>updates.push(value),error=>errors.push(error));
+await failing.refresh();
+failing.dispose();
+assert.deepEqual(errors,[failure]);
+assert.equal(updates.length,1,'A failed refresh does not replace the last good snapshot');
+console.log('Studio state checks passed: single-flight polling, disposal, late responses and errors.');
+const requested=[];
+let finishCached;
+const forcedPoll=createAutomationPoller(force=>{
+  requested.push(force);
+  return requested.length===1?new Promise(resolve=>{finishCached=resolve;}):Promise.resolve(snapshot);
+},()=>undefined,error=>{throw error;});
+const cached=forcedPoll.refresh(false);
+const recovery=forcedPoll.refresh(true);
+assert.equal(forcedPoll.refresh(true),recovery,'Concurrent recovery requests share one forced follow-up');
+finishCached(snapshot);
+await Promise.all([cached,recovery]);
+assert.deepEqual(requested,[false,true],'Forced recovery is not lost behind an in-flight cached read');
+forcedPoll.dispose();
+console.log('Forced recovery regression passed.');

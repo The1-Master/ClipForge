@@ -1,0 +1,314 @@
+import { sharpenCas } from '../src/replay/cas.ts';
+import { draw, DEFAULT_TOGGLES, COLORS } from '../src/replay/draw.ts';
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { Replay } from '../src/replay/engine.ts';
+import { FLAG } from '../src/api.ts';
+import { equipmentIcon, equipmentId, rosterEquipment } from '../src/replay/equipment.ts';
+import { access } from 'node:fs/promises';
+
+test('equipment icons resolve parser names and event aliases to local assets', async () => {
+  for (const [name, event] of [['AK-47', 'ak47'], ['M4A1-S', 'm4a1_silencer'], ['USP-S', 'usp_silencer'], ['Smoke Grenade', 'smokegrenade'], ['High Explosive Grenade', 'hegrenade'], ['Incendiary Grenade', 'incgrenade'], ['Flashbang', 'flashbang']]) {
+    assert.equal(equipmentIcon(name), equipmentIcon(`weapon_${event}`));
+    await access(new URL(`../public${equipmentIcon(name)}`, import.meta.url));
+  }
+  assert.equal(equipmentId('knife_karambit'), 'knife');
+  assert.equal(equipmentIcon('unknown weapon'), undefined);
+});
+
+test('inventory and ground equipment follow sampled state through throws, pickups, death and seeking', () => {
+  const first = frame(47628), second = frame(47632), dead = frame(47636, -1, false);
+  first.p[0].push(1, 2, 2, 3);
+  second.p[0].push(1, 2);
+  first.d = [[90, 1, 10, 20, 30]];
+  second.d = [];
+  const r = replay([first, second, dead], [{ t:47636, k:'death', p:0, x:0, y:0, z:0 }]);
+  r.data.weapons = ['', 'AK-47', 'Flashbang', 'Smoke Grenade'];
+  assert.deepEqual(r.stateAt(47631).players[0].inventory, ['AK-47', 'Flashbang', 'Flashbang', 'Smoke Grenade']);
+  assert.deepEqual(r.stateAt(47632).players[0].inventory, ['AK-47', 'Flashbang']);
+  assert.deepEqual(r.stateAt(47632).dropped, []);
+  assert.deepEqual(r.stateAt(47636).players[0].inventory, []);
+  assert.equal(r.stateAt(47636).deaths[0].team, 'CT');
+  assert.deepEqual(r.stateAt(47628).dropped, [{id:90, weapon:'AK-47', x:10, y:20, z:30}]);
+  assert.deepEqual(r.stateAt(47628).players[1].inventory, []);
+});
+
+const DEFUSING = 256;
+test('roster slots do not move with active weapon and preserve duplicate utility', () => {
+  const inventory = ['Flashbang', 'USP-S', 'AK-47', 'Smoke Grenade', 'Flashbang', 'Knife', 'C4 Explosive'];
+  const expected = [['AK-47'], ['USP-S'], ['Smoke Grenade', 'Flashbang', 'Flashbang'], ['C4 Explosive']];
+  assert.deepEqual(rosterEquipment(inventory, 'AK-47', true, false), expected);
+  assert.deepEqual(rosterEquipment(inventory, 'Flashbang', true, false), expected);
+  assert.deepEqual(rosterEquipment(inventory, 'Knife', true, false), expected);
+  assert.deepEqual(rosterEquipment([], 'USP-S', false, true), [[], ['USP-S'], [], ['Defuse Kit']]);
+});
+function replay(frames, events) {
+  return new Replay({
+    schemaVersion: 3, tickRate: 64, step: 4, firstTick: frames[0].t,
+    lastTick: frames.at(-1).t, players: [{ steamid: 'ct0', name: 'CT 0' }, { steamid: 'ct1', name: 'CT 1' }],
+    weapons: [''], frames, events,
+  }, {
+    rounds: [{ round: 9, startTick: 41266, freezeEndTick: 42500, endTick: 48743, officiallyEndedTick: 49191, roster: { ct0: 'CT', ct1: 'CT' } }],
+    info: { players: [] }, stats: [], roundSummaries: [],
+  }, []);
+}
+function frame(t, active = -1, alive = true) {
+  return { t, p: [0, 1].map((pid) => [pid, 0, 0, 0, 0, alive ? 100 : 0, 0, (alive ? FLAG.alive : 0) | (pid === active ? DEFUSING : 0), 0, 0]), g: [] };
+}
+
+// Round 9 transitions from the reported demo; it contains no bomb_abortdefuse events.
+test('round 9 fake defuses stop at the first sampled release, including seeking', () => {
+  const r = replay([
+    frame(47628), frame(47632, 0), frame(47644, 0), frame(47648),
+    frame(47916), frame(47920, 1), frame(47936, 1), frame(47940),
+    frame(48228), frame(48232, 1), frame(48424, 1), frame(48428), frame(48744),
+  ], [
+    { t: 46119, k: 'plant' }, { t: 47631, k: 'defuseStart', p: 0, kit: false },
+    { t: 47917, k: 'defuseStart', p: 1, kit: false }, { t: 48231, k: 'defuseStart', p: 1, kit: false },
+    { t: 48743, k: 'explode' },
+  ]);
+  for (const tick of [47648, 47940, 48428, 48740]) assert.equal(r.stateAt(tick).bomb.defuse, undefined, `released at ${tick}`);
+  for (const tick of [47631, 47644, 47920, 48232, 48424]) assert.ok(r.stateAt(tick).bomb.defuse, `active at ${tick}`);
+  assert.equal(r.stateAt(47917).bomb.defuse.remaining, 10);
+  assert.equal(r.stateAt(48744).bomb.state, 'exploded');
+});
+
+test('a tap shorter than one replay sample cannot leave a countdown running', () => {
+  const r = replay([frame(47628), frame(47632), frame(47636)], [{ t: 46119, k: 'plant' }, { t: 47630, k: 'defuseStart', p: 0, kit: false }]);
+  assert.ok(r.stateAt(47630).bomb.defuse);
+  assert.equal(r.stateAt(47632).bomb.defuse, undefined);
+});
+
+test('the state belongs to the defusing player, not another CT', () => {
+  const r = replay([frame(47628), frame(47632, 1)], [{ t: 46119, k: 'plant' }, { t: 47630, k: 'defuseStart', p: 0 }]);
+  assert.equal(r.stateAt(47632).bomb.defuse, undefined);
+});
+
+test('normal kit and no-kit defuses keep their countdown until completion', () => {
+  for (const kit of [true, false]) {
+    const needs = kit ? 5 : 10, since = 47632, finish = since + needs * 64;
+    const r = replay([frame(since, 0), frame(since + 64, 0), frame(finish)], [
+      { t: 46119, k: 'plant' }, { t: since, k: 'defuseStart', p: 0, kit }, { t: finish, k: 'defuse', p: 0 },
+    ]);
+    assert.equal(r.stateAt(since + 64).bomb.defuse.remaining, needs - 1);
+    assert.equal(r.stateAt(finish).bomb.state, 'defused');
+    assert.equal(r.stateAt(finish).bomb.defuse, undefined);
+  }
+});
+
+test('an explicit abort stops immediately even before the next player sample', () => {
+  const r = replay([frame(47628, 0), frame(47632, 0)], [
+    { t: 46119, k: 'plant' }, { t: 47628, k: 'defuseStart', p: 0 }, { t: 47630, k: 'defuseAbort', p: 0 },
+  ]);
+  assert.ok(r.stateAt(47629).bomb.defuse);
+  assert.equal(r.stateAt(47630).bomb.defuse, undefined);
+});
+
+test('a dead defuser cannot keep a countdown active', () => {
+  const r = replay([frame(47628, 0), frame(47632, 0, false)], [
+    { t: 46119, k: 'plant' }, { t: 47628, k: 'defuseStart', p: 0 },
+  ]);
+  assert.equal(r.stateAt(47632).bomb.defuse, undefined);
+});
+
+test('player labels stay above every marker and focus is painted last', () => {
+  const calls = [];
+  const ctx = new Proxy({}, {
+    get(target, key) {
+      if (key in target) return target[key];
+      if (key === 'measureText') return text => ({ width: text.length * 8 });
+      return (...args) => calls.push({ key, args, color: target.fillStyle, stroke: target.strokeStyle });
+    },
+  });
+  const player = { x: 100, y: 100, z: 0, yaw: 0, hp: 100, alive: true, team: 'CT' };
+  const players = [{ ...player, pid: 1, name: 'Focused' }, { ...player, pid: 2, name: 'Other' }];
+  const map = { posX: 0, posY: 0, scale: 1, layers: [{ altitudeMin: -100, altitudeMax: 100 }] };
+  const state = { players, grenades: [], effects: [], shots: [], deaths: [] };
+  draw(ctx, 500, 500, map, [], state, { ...DEFAULT_TOGGLES, sound: 'off' }, { zoom: 2, panX: 0, panY: 0 }, 1);
+  const firstLabel = calls.findIndex(call => call.key === 'fillText');
+  assert.ok(firstLabel > calls.findLastIndex(call => call.key === 'arc'));
+  assert.deepEqual(calls.filter(call => call.key === 'fillText').map(call => call.args[0]), ['Other', 'Focused']);
+  const discs = calls.filter(call => call.key === 'fillRect');
+  assert.equal(discs[0].color, 'rgba(0,0,0,0.55)');
+  assert.equal(discs[2].color, 'rgba(0,0,0,0.55)', 'Focused and team markers share a dark health backing');
+  assert.equal(discs[3].color, '#b995ff');
+  assert.deepEqual(players.map(p => p.pid), [1, 2], 'Drawing must not reorder replay state');
+});
+
+test('sampled fire cells disappear and seeking restores their recorded state', () => {
+  const r = replay([frame(100), frame(104), frame(108)], []);
+  r.data.schemaVersion = 5;
+  r.data.frames[0].f = [[10, 20, 30], [40, 50, 30]];
+  r.data.frames[1].f = [[10, 20, 30]];
+  assert.deepEqual(r.stateAt(102).fireCells, [[10, 20, 30], [40, 50, 30]]);
+  assert.deepEqual(r.stateAt(104).fireCells, [[10, 20, 30]]);
+  assert.deepEqual(r.stateAt(108).fireCells, []);
+  assert.equal(r.stateAt(100).fireCells.length, 2);
+});
+
+test('map names fit 110px including padding without splitting graphemes; focused names stay complete', () => {
+  const labels = [], backgrounds = [];
+  let measurements = 0;
+  const measure = text => { measurements++; return Array.from(text).length * 8; };
+  const ctx = new Proxy({}, { get(target, key) {
+    if (key in target) return target[key];
+    if (key === 'measureText') return text => ({width:measure(text)});
+    return (...args) => {
+      if (key === 'fillText') labels.push(args[0]);
+      if (key === 'fillRect' && target.fillStyle === 'rgba(0,0,0,0.6)') backgrounds.push(args[2]);
+    };
+  }});
+  const names = ['A very long player display name', '這是一個很長很長很長很長的玩家名稱', '👩‍💻'.repeat(10), 'A very long focused player name', 'Short'];
+  const players = names.map((name,pid)=>({pid,name,x:100,y:100,z:0,yaw:0,hp:100,alive:true,team:'CT'}));
+  const map = {posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
+  draw(ctx,500,500,map,[],{players,grenades:[],effects:[],shots:[],deaths:[]},{...DEFAULT_TOGGLES,sound:'off'},{zoom:1,panX:0,panY:0},3);
+  assert.ok(labels.slice(0,3).every(name=>name.endsWith('…')));
+  assert.match(labels[2], /^(?:👩‍💻)+…$/u);
+  assert.equal(labels[3],'Short');
+  assert.equal(labels[4],names[3]);
+  assert.ok(backgrounds.slice(0,4).every(width=>width<=110));
+  assert.ok(backgrounds[4]>110);
+  assert.deepEqual(players.map(p=>p.name),names,'Original names remain available in the roster');
+  const render = (focus = 3, size = 16) => draw(ctx,500,500,map,[],{players,grenades:[],effects:[],shots:[],deaths:[]},{...DEFAULT_TOGGLES,sound:'off'},{zoom:1,panX:0,panY:0},focus,size);
+  render();
+  measurements = 0;
+  render();
+  assert.equal(measurements,0,'Unchanged labels reuse both text and width');
+  players[0].name = 'Renamed';
+  render();
+  assert.equal(measurements,1,'Only a changed name is measured again');
+  measurements = 0;
+  render(3,18);
+  assert.ok(measurements > 0,'Font changes invalidate measurements');
+  measurements = 0;
+  render(0,18);
+  assert.ok(measurements > 0,'Changing focus refreshes full and truncated labels');
+});
+
+test('players on their own radar panel remain opaque regardless of panel altitude or order', () => {
+  const stack = [], fills = [], labels = [];
+  const ctx = new Proxy({globalAlpha:1}, {get(target,key) {
+    if (key in target) return target[key];
+    if (key === 'save') return () => stack.push({...target});
+    if (key === 'restore') return () => Object.assign(target,stack.pop());
+    if (key === 'measureText') return () => ({width:30});
+    if (key === 'fillRect') return () => { if (target.fillStyle === COLORS.ct) fills.push(target.globalAlpha); };
+    if (key === 'fillText') return name => { if (name === 'Upper' || name === 'Lower') labels.push([name,target.globalAlpha]); };
+    return () => {};
+  }});
+  const players = [150,50].map((z,pid)=>({pid,name:pid?'Lower':'Upper',x:100,y:100,z,yaw:0,hp:100,alive:true,team:'CT'}));
+  const state = {players,grenades:[],effects:[],shots:[],deaths:[]};
+  const layers = [{altitudeMin:100,altitudeMax:200},{altitudeMin:0,altitudeMax:100}];
+  const render = layers => draw(ctx,500,500,{posX:0,posY:0,scale:1,layers},[],state,{...DEFAULT_TOGGLES,sound:'off'},{zoom:1,panX:0,panY:0});
+  render(layers);
+  assert.deepEqual(fills,[1,1]);
+  assert.deepEqual(labels,[['Upper',1],['Lower',1]]);
+  assert.equal(ctx.globalAlpha,1,'Transparency does not leak to later drawing');
+  fills.length=labels.length=0;
+  render([...layers].reverse());
+  assert.deepEqual(fills,[1,1]);
+  fills.length=0;
+  render([{altitudeMin:0,altitudeMax:200}]);
+  assert.deepEqual(fills,[1,1],'Single-floor maps remain opaque');
+});
+
+test('death crosses use each player team color', () => {
+  const strokes = [];
+  const ctx = new Proxy({}, {get(target,key) {
+    if (key in target) return target[key];
+    return () => { if(key === 'stroke') strokes.push(target.strokeStyle); };
+  }});
+  const map = {posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
+  const state = {players:[],grenades:[],effects:[],shots:[],deaths:[{x:10,y:20,z:0,team:'CT'},{x:30,y:40,z:0,team:'TERRORIST'}]};
+  draw(ctx,500,500,map,[],state,{...DEFAULT_TOGGLES,sound:'off'},{zoom:1,panX:0,panY:0});
+  assert.deepEqual(strokes,[COLORS.ct,COLORS.t]);
+});
+
+// Drawing coordinates use radar pixels so resize, pan and zoom preserve map positions.
+test('annotations stay on their floor through zoom, pan and vertical layout', async () => {
+  const { annotationPoint, drawAnnotations } = await import('../src/replay/annotations.ts');
+  const { layout } = await import('../src/replay/draw.ts');
+  const initial = layout(1000,600,2,{zoom:1,panX:0,panY:0});
+  const [ox,oy] = initial.origins[1];
+  const hit = annotationPoint(initial,ox+initial.side/2,oy+initial.side/4);
+  assert.deepEqual(hit,{layer:1,point:[512,256]});
+  assert.equal(annotationPoint(initial,-1,-1),undefined);
+  assert.deepEqual(annotationPoint(initial,-100,-100,1).point,[0,0]);
+  assert.deepEqual(annotationPoint(initial,10000,10000,1).point,[1024,1024]);
+  for(const [width,height,view] of [[1000,600,{zoom:2,panX:50,panY:-30}],[400,900,{zoom:1,panX:0,panY:0}]]) {
+    const lay=layout(width,height,2,view), calls=[];
+    const ctx=new Proxy({}, {get:(_,key)=>(...args)=>calls.push([key,...args])});
+    drawAnnotations(ctx,lay,[{tool:'arrow',color:'#fff',layer:hit.layer,points:[hit.point,[700,400]]}]);
+    assert.deepEqual(calls.find(c=>c[0]==='moveTo'),['moveTo',lay.origins[1][0]+512*lay.k,lay.origins[1][1]+256*lay.k]);
+    assert.equal(calls.filter(c=>c[0]==='stroke').length,2,'Dark outline and colored stroke');
+    assert.ok(calls.some(c=>c[0]==='clip'),'Drawing stays inside its floor');
+    assert.equal(calls.filter(c=>c[0]==='moveTo').length,3,'Arrow has two head segments');
+  }
+});
+
+test('ellipse and rectangle support dragging in either direction without a diagonal', async () => {
+  const { drawAnnotations } = await import('../src/replay/annotations.ts');
+  const lay={side:1024,k:1,origins:[[10,20]]};
+  for(const tool of ['ellipse','rectangle']) for(const points of [[[100,200],[300,400]],[[300,400],[100,200]]]) {
+    const calls=[];
+    const ctx=new Proxy({}, {get:(_,key)=>(...args)=>calls.push([key,...args])});
+    drawAnnotations(ctx,lay,[{tool,color:'#fff',layer:0,points}]);
+    if(tool==='ellipse') assert.deepEqual(calls.find(c=>c[0]==='ellipse'),['ellipse',210,320,100,100,0,0,Math.PI*2]);
+    else assert.deepEqual(calls.filter(c=>c[0]==='rect').at(-1),['rect',110,220,200,200]);
+    assert.ok(!calls.some(c=>c[0]==='lineTo'),'Shapes have no diagonal line');
+  }
+});
+
+test('annotations sit directly above the radar and below replay effects', () => {
+  const calls=[];
+  const ctx=new Proxy({}, {get(target,key) {
+    if(key in target) return target[key];
+    return (...args)=>calls.push({key,args,stroke:target.strokeStyle});
+  }});
+  const map={posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
+  const state={tick:1,players:[],grenades:[],shots:[],deaths:[],effects:[{kind:'smoke',x:100,y:100,z:0,start:0,end:10}]};
+  draw(ctx,500,500,map,[{width:2048,height:2048}],state,DEFAULT_TOGGLES,{zoom:1,panX:0,panY:0},undefined,14,[{tool:'pen',color:'#ff70d4',layer:0,points:[[0,0],[200,200]]}]);
+  const radar=calls.findIndex(c=>c.key==='drawImage');
+  const ink=calls.findIndex(c=>c.key==='stroke' && c.stroke==='#ff70d4');
+  const smoke=calls.findIndex(c=>c.key==='arc');
+  assert.ok(radar>=0 && radar<ink && ink<smoke,'Radar → annotation → smoke');
+});
+
+test('CAS preserves flat colors and alpha while increasing a soft edge contrast', () => {
+  const flat = new Uint8ClampedArray([80,120,160,255,80,120,160,128,80,120,160,255]);
+  assert.deepEqual(sharpenCas(flat,3,1),flat);
+  assert.deepEqual(sharpenCas(flat.slice(0,4),1,1),flat.slice(0,4));
+  const ramp = new Uint8ClampedArray([64,64,64,255,64,64,64,255,100,100,100,255,160,160,160,255,192,192,192,255,192,192,192,255]);
+  const result = sharpenCas(ramp,6,1);
+  assert.ok(result[8] < ramp[8] && result[12] > ramp[12], 'Soft transition gains contrast');
+  assert.equal(result[0],64);
+  assert.equal(result[20],192);
+  const transparent = new Uint8ClampedArray([255,0,255,0,80,120,160,255]);
+  assert.deepEqual(sharpenCas(transparent,2,1),transparent,'Hidden RGB cannot contaminate a visible border');
+  assert.throws(()=>sharpenCas(flat,1,1));
+});
+
+test('smoke coverage seeks independently and distinguishes unavailable from empty', () => {
+  const r = replay([frame(100),frame(140)], []);
+  const cells = [[0,20,30,3,15]];
+  r.data.smoke = [{t:100,cells},{t:108,cells:[]},{t:120,cells:null}];
+  assert.deepEqual(r.stateAt(104).smokeCells,cells);
+  assert.deepEqual(r.stateAt(110).smokeCells,[]);
+  assert.equal(r.stateAt(125).smokeCells,undefined);
+  assert.deepEqual(r.stateAt(100).smokeCells,cells);
+});
+
+test('smoke runs draw density coverage instead of a circle and retain empty gaps', () => {
+  const calls=[];
+  const ctx=new Proxy({}, {get(target,key) {return key in target?target[key]:(...args)=>calls.push({key,args,alpha:target.globalAlpha});}});
+  const map={posX:0,posY:0,scale:1,layers:[{altitudeMin:-100,altitudeMax:100}]};
+  const state={tick:1,players:[],grenades:[],shots:[],deaths:[],smokeCells:[[100,100,0,2,15],[180,100,0,1,5],[220,100,0,1,0]],effects:[{kind:'smoke',x:100,y:100,z:0,start:0,end:10}]};
+  draw(ctx,500,500,map,[{width:2048,height:2048}],state,DEFAULT_TOGGLES,{zoom:1,panX:0,panY:0});
+  assert.equal(calls.filter(c=>c.key==='arc').length,0);
+  const fills=calls.filter(c=>c.key==='fillRect');
+  assert.equal(fills.length,3);
+  assert.equal(fills[0].alpha,1,'Dense smoke retains its maximum opacity');
+  assert.ok(fills[1].alpha>0.5 && fills[1].alpha<1,'Partial density becomes visible earlier without becoming solid');
+  assert.equal(fills[2].alpha,0,'Empty smoke remains fully transparent');
+  assert.equal(ctx.globalAlpha,1);
+});

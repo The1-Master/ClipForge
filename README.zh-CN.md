@@ -1,0 +1,93 @@
+# CS DemoDesk
+
+[English](README.md) | [繁體中文](README.zh-TW.md) | 简体中文 | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md)
+
+专为 Counter-Strike 2 打造的 Windows Demo 管理与分析工具：查看玩家统计、2D 回放与实验性异常数据，并将高光或可疑片段导出为视频。
+
+## 下载
+
+- **[Microsoft Store](https://apps.microsoft.com/detail/9N5G4VXSDGS5)** — 通过 Microsoft Store 安装与自动更新。
+- **[免安装 EXE](https://github.com/noih/cs-demodesk/releases/latest)** — 从 GitHub Releases 下载 `.exe`，免安装。
+
+## 使用须知
+
+- CS2 更新后若无法导出视频，到设置页重新下载 HLAE 通常即可恢复。
+- 录制期间无法同时游玩；多个导出任务会依次执行。
+- 聊天软件或浏览器播放建议选 H.264；NVIDIA 编码需 NVIDIA 显卡。
+
+## 功能
+
+### 比赛统计
+
+汇总比赛结果与玩家表现，涵盖交战、道具使用与各类回合情境，并通过对比图表、回合趋势和压枪轨迹，从不同角度回顾比赛。
+
+![AK-47、M4A4 与 M4A1-S 的压枪轨迹](docs/images/zh-CN/03-combat-analysis.png)
+
+### 异常数据（实验性）
+
+统计全场玩家的瞄准、射击与移动行为，查看 TTD、估算穿烟命中率等数据，并按玩家与行为项目选择、合并及导出可疑片段，方便回看。
+
+统计仅供参考，不是作弊判定；无法识别刻意掩饰且数据无异常的外挂，没有异常也不代表没有作弊。
+
+![异常数据（实验性）](docs/images/zh-CN/05-anomaly-data.png)
+
+### 集锦视频
+
+- 自动检测并评分集锦片段（多杀、残局、ninja defuse）
+- 勾选的片段由后台运行的 CS2 录制，FFmpeg 编码
+- 分辨率、FPS、H.264 / H.265、CPU 或 NVIDIA
+- 逐项画面元素开关，可合并为单个视频
+- 文件大小上限（10 / 20 / 50 MB），便于在聊天软件分享
+
+![高光评分详情](docs/images/zh-CN/04-highlights.png)
+
+### 2D 回放
+
+- 玩家位置、视角、血量、护甲、武器、金钱
+- 投掷物、烟雾 / 燃烧 / 闪光范围、C4 与拆弹倒计时、击杀信息、可听见范围
+- 回合切换、播放速度、跟随玩家
+- 多层地图每层各一面板；雷达图从本机游戏文件提取
+
+![2D 回放](docs/images/zh-CN/07-2d-view.png)
+
+## 设计
+
+### 只读游戏文件
+
+不在游戏目录写入任何 plugin、script 或 cfg，也不修改任何游戏文件。录制通过 [HLAE](https://github.com/advancedfx/advancedfx) 以 `-insecure` 启动独立的 CS2 进程（与手动使用 HLAE 相同），经游戏内置的 netcon 控制台发送指令，并以独立的 `USRLOCALCSGO` 目录保存游戏设置，不影响玩家自己的设置。所有第三方工具都下载到程序自己的数据目录：
+
+| 工具 | 用途 | 来源 |
+| --- | --- | --- |
+| HLAE | 录制（mirv_streams） | [advancedfx/advancedfx](https://github.com/advancedfx/advancedfx) |
+| FFmpeg | 编码、合并、大小上限 | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)（GPL） |
+| Source 2 Viewer CLI | 从 vpk 提取雷达图 | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat)（MIT） |
+| demoparser | 解析 demo（vendored） | [LaihoE/demoparser](https://github.com/LaihoE/demoparser)（MIT） |
+
+### 文件式存储
+
+不使用数据库。设置、导出任务与分析缓存以文件存储，默认位于用户主目录下的 `%USERPROFILE%\.noih\demodesk-data`，可在设置中更改数据目录。demo 保留在原始位置，可逐个添加，也可通过扫描文件夹加载。
+
+## 构建
+
+需要 [Rust](https://rustup.rs)（stable）与 Visual Studio Build Tools（使用 C++ 的桌面开发）、Node.js 24.20.0（`.nvmrc`）、WebView2（Windows 内置）。
+
+```powershell
+npm install
+npm run app:dev      # 开发：Vite + Tauri 窗口
+npm run app:build    # dist-portable\CS-DemoDesk-<version>.exe
+npm run test:core    # Rust 单元测试
+```
+
+## 发布
+
+Release 由 [GitHub Actions](.github/workflows/release.yml) 构建并附 build provenance 证明。验证下载的文件确实由本仓库构建：
+
+```powershell
+gh attestation verify CS-DemoDesk-<version>.exe --owner noih
+```
+
+## 许可
+
+Copyright (C) 2026 NOIH - <https://github.com/noih>
+
+[GNU AGPL-3.0](LICENSE)。第三方组件依各自许可（见上表；vendored 的 demoparser 保留其 MIT 许可于 `vendor/demoparser/LICENSE`）。

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64">
+  <title>ClipForge</title>
+  <rect x="1" y="1" width="62" height="62" rx="14" fill="#141A23"/>
+  <g transform="translate(5 6) scale(.82)">
+    <path fill="#FFB15A" fill-rule="evenodd" d="M18 10h25l9 9-11 8-5-5H23l-6 10 6 10h13l5-5 11 8-9 9H18L4 32 18 10Zm9 15v14l12-7-12-7Z"/>
+    <path fill="#67DEC0" d="m53 2 2.5 7.5L63 12l-7.5 2.5L53 22l-2.5-7.5L43 12l7.5-2.5L53 2Z"/>
+  </g>
+</svg>

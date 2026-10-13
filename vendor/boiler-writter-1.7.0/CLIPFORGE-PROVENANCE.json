@@ -1,0 +1,11 @@
+{
+  "component": "boiler-writter",
+  "version": "1.7.0",
+  "commit": "fafb37c1b9bc53e7adff9c4f9ab3b5da68064da0",
+  "sourceFiles": 25,
+  "originalLicenseNotices": "Top-level MIT; CSGOClient.h, CSGOClient.cpp and GCMsgHandler.h retain GPL-3.0-or-later notices. Original package metadata declares GPL-3.0.",
+  "binaryIncluded": false,
+  "steamworksSdkIncluded": false,
+  "linkingExceptionFound": false,
+  "distributionNote": "Source is retained with original notices. The public beta does not redistribute this helper executable; private source builds require a user-obtained Steamworks SDK and licensing review."
+}

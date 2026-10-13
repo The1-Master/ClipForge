@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "component": "Microsoft Detours",
+  "version": "4.0.1",
+  "source": "https://codeload.github.com/microsoft/Detours/zip/refs/tags/v4.0.1",
+  "archiveSHA256": "5ab84eb08fb9befeb16ffd04ca283731b1e0e1e53b1947ce7868d4b9654e43fc",
+  "license": "MIT",
+  "purpose": "Exact unmodified source dependency compiled into the ClipForge native window hook. Build recipe is crates/demodesk-core/build.rs.",
+  "excluded": "Compiled binaries and build artifacts are omitted."
+}

@@ -1,0 +1,10 @@
+{
+  "component": "Protocol Buffers C++",
+  "version": "3.20.3",
+  "archive": "protobuf-cpp-3.20.3.zip",
+  "source": "https://github.com/protocolbuffers/protobuf/releases/download/v3.20.3/protobuf-cpp-3.20.3.zip",
+  "archiveSha256": "2c65db747b0fec51e84480b7092aaff88b072fb27f9187073a219e09bb748bdf",
+  "sourceFiles": 1033,
+  "license": "BSD-3-Clause; original LICENSE retained",
+  "purpose": "Complete source for the static protobuf dependency required by the pinned boiler-writter source. No compiled runtime or proprietary Steamworks SDK is included."
+}

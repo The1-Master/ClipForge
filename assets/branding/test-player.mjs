@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { createServer } from 'vite';
+const require=createRequire(import.meta.url);
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'J:/CS2ClipStudio/tools/desktop-ui-test/node_modules/playwright');
+const {default:AxeBuilder}=await import('@axe-core/playwright');
+const output=process.env.UI_AUDIT_OUTPUT_DIR||'J:/CS2ClipStudio/research/benchmarks/redesign';
+await mkdir(output,{recursive:true});
+const video=await readFile('J:/CS2ClipStudio/cache/redesign-player/fixture.mp4');
+const server=await createServer({cacheDir:'J:/CS2ClipStudio/cache/redesign-player/vite',server:{host:'127.0.0.1',port:0,watch:{ignored:['**/*']}},plugins:[{name:'player-verification-video',configureServer(server){server.middlewares.use('/__player-video.mp4',(request,response)=>{
+  response.setHeader('Content-Type','video/mp4');response.setHeader('Accept-Ranges','bytes');
+  const range=request.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
+  const start=range?Number(range[1]):0,end=range&&range[2]?Math.min(video.length-1,Number(range[2])):video.length-1;
+  if(start<0||start>=video.length||end<start){response.statusCode=416;response.end();return;}
+  if(range){response.statusCode=206;response.setHeader('Content-Range',`bytes ${start}-${end}/${video.length}`);}
+  response.setHeader('Content-Length',end-start+1);response.end(video.subarray(start,end+1));
+});}}]});
+await server.listen();
+const browser=await chromium.launch({channel:'chrome',headless:true});
+try {
+  const context=await browser.newContext({viewport:{width:960,height:640}});
+  const page=await context.newPage();
+  await page.addInitScript(()=>localStorage.setItem('demodesk.appearance','dark'));
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto(server.resolvedUrls.local[0]+'assets/branding/player-fixture.html');
+  await page.waitForFunction(()=>document.querySelector('video')?.duration===6);
+  await page.evaluate(()=>document.fonts.ready);
+  assert.ok(await page.evaluate(()=>document.fonts.check('16px Inter')),'Local Inter is ready');
+  assert.equal(await page.locator('video').count(),1,'StrictMode leaves exactly one video');
+  await page.getByRole('button',{name:'Play',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('video').paused===false);
+  await page.getByRole('button',{name:'Pause',exact:true}).click();
+  await page.locator('video').focus();await page.locator('video').press('ArrowRight');
+  await page.waitForFunction(()=>document.querySelector('video').currentTime>=5);
+  await page.locator('video').press('ArrowLeft');
+  await page.waitForFunction(()=>document.querySelector('video').currentTime<1);
+  await page.locator('video').press('m');assert.equal(await page.locator('video').evaluate(video=>video.muted),true);
+  await page.getByLabel('Volume',{exact:true}).fill('0.25');
+  assert.equal(await page.locator('video').evaluate(video=>video.muted),false);
+  assert.equal(await page.locator('video').evaluate(video=>video.volume),.25);
+  await page.locator('video').press('k');await page.waitForFunction(()=>document.querySelector('video').paused===false);
+  await page.locator('video').press('k');await page.waitForFunction(()=>document.querySelector('video').paused===true);
+  await page.evaluate(()=>{window.oldVideo=document.querySelector('video');window.switchPlayerSource('/__player-video.mp4?v=2');});
+  await page.waitForFunction(()=>document.querySelector('video')?.getAttribute('src')?.endsWith('?v=2'));
+  await page.waitForFunction(()=>document.querySelector('video')?.duration===6);
+  assert.equal(await page.evaluate(()=>window.oldVideo.paused&&window.oldVideo.getAttribute('src')===null),true,'Source replacement releases the old media');
+  assert.equal(await page.locator('video').count(),1,'Source changes retain one player');
+  assert.equal(await page.locator('video').evaluate(video=>video.muted),false,'New source mute state matches its controls');
+  const audit=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa','wcag22aa']).analyze();
+  await writeFile(output+'/accessibility-player.json',JSON.stringify(audit,null,2));
+  assert.deepEqual(audit.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)})),[]);
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await page.locator('.app-spinner').evaluate(el=>getComputedStyle(el).animationName),'none','Reduced motion stops persistent decorative rotation');
+  await page.screenshot({path:output+'/player-dark-960.png'});
+  await page.evaluate(()=>window.unmountPlayer());
+  assert.equal(await page.locator('video').count(),0,'Leaving releases the player');
+  assert.deepEqual(errors,[]);
+  await writeFile(output+'/player-acceptance.json',JSON.stringify({passed:true,checks:['Inter local load','StrictMode playback','play/pause','keyboard seeking','mute and volume','single player across source changes','source cleanup','axe WCAG A/AA','reduced motion','unmount cleanup'],axeViolations:audit.violations.length},null,2));
+  console.log('Clip player checks passed: StrictMode, playback controls, keyboard, single media, cleanup, accessibility and reduced motion.');
+} finally {await browser.close();await server.close();}

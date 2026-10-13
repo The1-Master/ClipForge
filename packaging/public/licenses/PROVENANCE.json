@@ -1,0 +1,78 @@
+{
+  "licenses": [
+    {
+      "file": "OpenSSL-3.5.8-Apache-2.0.txt",
+      "runtimeVersionObserved": "3.5.8",
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+      "source": "https://raw.githubusercontent.com/openssl/openssl/openssl-3.5.8/LICENSE.txt"
+    },
+    {
+      "noticeFamily": "MIT notice family; not proof that the binary uses v3.4.6",
+      "officialCpython344ArtifactSha256": "eff52743773eb550fcc6ce3efc37c85724502233b6b002a35496d828bd7b280a",
+      "runtimeVersionObserved": null,
+      "matchesOfficialCpython344": false,
+      "source": "https://raw.githubusercontent.com/libffi/libffi/v3.4.6/LICENSE",
+      "runtimeBinarySha256": "f39e5a9ff36f4c3dd74b72bce4726e07b8b77ceec92d4a8d5b788e7f0bc061af",
+      "sha256": "67894089811f93fca47a76f85e017da6f8582d4ba0905963c6e0f1ad6df7a195",
+      "file": "libffi-MIT.txt"
+    },
+    {
+      "file": "Expat-2.8.3-MIT.txt",
+      "runtimeVersionObserved": "2.8.3",
+      "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87",
+      "source": "https://raw.githubusercontent.com/libexpat/libexpat/R_2_8_3/expat/COPYING"
+    },
+    {
+      "file": "zlib-1.3.2.txt",
+      "runtimeVersionObserved": "1.3.2",
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+      "source": "https://raw.githubusercontent.com/madler/zlib/v1.3.2/LICENSE"
+    },
+    {
+      "runtimeVersionObserved": "2.5.1",
+      "file": "mpdecimal-2.5.1-BSD-2-Clause.txt",
+      "extractedOriginalHeader": true,
+      "sha256": "085ad39180c99bcd045c86d9bbc4e147a64e5a6b4c58d98f65f0c446e755ad4e",
+      "source": "https://raw.githubusercontent.com/python/cpython/v3.12.14/Modules/_decimal/libmpdec/mpdecimal.c"
+    },
+    {
+      "file": "xz-liblzma-COPYING.txt",
+      "runtimeVersionObserved": null,
+      "noticeFamily": "liblzma public-domain family; no unrelated xz programs bundled",
+      "source": "https://raw.githubusercontent.com/tukaani-project/xz/v5.2.5/COPYING",
+      "sha256": "bcb02973ef6e87ea73d331b3a80df7748407f17efdb784b61b47e0e610d3bb5c"
+    },
+    {
+      "file": "protobuf-3.20.3-BSD-3-Clause.txt",
+      "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d",
+      "executableBundled": false,
+      "source": "https://raw.githubusercontent.com/protocolbuffers/protobuf/v3.20.3/LICENSE",
+      "sourceVersion": "3.20.3"
+    },
+    {
+      "executableBundled": false,
+      "file": "boiler-GPL-3.0.txt",
+      "copiedFromRetainedGplLicense": true,
+      "source": "https://www.gnu.org/licenses/gpl-3.0.html",
+      "sourceGrant": "GPL-3.0-or-later original Boiler files",
+      "sha256": "59946f4fd5bef769c6242df792286224dca045be4d2b0df0ac79a35ba0d51d6f"
+    }
+  ],
+  "helperSource": {
+    "linkingExceptionFound": false,
+    "executableBundled": false,
+    "commit": "fafb37c1b9bc53e7adff9c4f9ab3b5da68064da0",
+    "repository": "https://github.com/akiver/boiler-writter",
+    "valveSdkBundled": false
+  },
+  "cpythonVersionObserved": "3.12.14",
+  "protobufSource": {
+    "independentPublishedDigestAvailable": false,
+    "file": "sources/protobuf-cpp-3.20.3.zip",
+    "bytes": 5895322,
+    "source": "https://github.com/protocolbuffers/protobuf/releases/download/v3.20.3/protobuf-cpp-3.20.3.zip",
+    "sha256": "2c65db747b0fec51e84480b7092aaff88b072fb27f9187073a219e09bb748bdf"
+  },
+  "schemaVersion": 2,
+  "checkedDate": "2026-10-13"
+}

@@ -1,0 +1,6 @@
+# Build locally, inspect its immutable sha256 digest, and put that digest in environment.json.
+# Never run downloaded media during image construction.
+FROM docker.io/library/debian:bookworm-slim
+RUN apt-get update && apt-get install --no-install-recommends -y python3 ffmpeg && rm -rf /var/lib/apt/lists/*
+COPY validator_worker.py /validator_worker.py
+ENTRYPOINT ["python3", "/validator_worker.py"]

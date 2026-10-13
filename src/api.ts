@@ -1,0 +1,545 @@
+import { translateError, type ErrorCode } from './errorCodes.ts';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+
+// ---- types mirrored from the Rust side (serde camelCase) ----
+
+export type Team = 'CT' | 'TERRORIST';
+
+export interface PlayerInfo {
+  name: string;
+  steamid: string;
+  teamNumber: number;
+  userId?: number;
+}
+export interface DemoInfo {
+  path: string;
+  mapName: string;
+  serverName: string;
+  tickRate: number;
+  players: PlayerInfo[];
+}
+export interface KillEvent {
+  tick: number;
+  round: number;
+  attacker?: { steamid: string; name: string; team: Team; health: number; weaponName: string };
+  victim: { steamid: string; name: string; team: Team; weaponName: string };
+  assister?: { steamid: string; name: string; team: Team };
+  weapon: string;
+  headshot: boolean;
+  noscope: boolean;
+  penetrated: number;
+  thruSmoke: boolean;
+  attackerBlind: boolean;
+  attackerInAir: boolean;
+  assistedFlash: boolean;
+  distance: number;
+  hitgroup: string;
+  isFreezePeriod: boolean;
+}
+export interface RecordedDeath {
+  id: string;
+  kill: KillEvent;
+  phase: 'competitive' | 'post-round' | 'warmup' | 'post-match' | 'freeze' | 'unknown';
+  roundNumber?: number;
+  tags: string[];
+}
+export interface DetectOptions {
+  players: string[];
+  leadInSeconds: number;
+  leadOutSeconds: number;
+  minScore: number;
+  /** Zero retains all scored candidates. Every selected player's death is retained. */
+  topN: number;
+  includeDeaths: boolean;
+}
+export const defaultDetectOptions: DetectOptions = {
+  players: [], leadInSeconds: 5, leadOutSeconds: 3, minScore: 1, topN: 0, includeDeaths: true,
+};
+export interface RoundInfo {
+  round: number;
+  startTick: number;
+  freezeEndTick: number;
+  endTick: number;
+  officiallyEndedTick: number;
+  winner?: Team;
+  reason: string;
+  roster: Record<string, Team>;
+  bombPlantedTick?: number;
+  bombDefusedTick?: number;
+  bombDefuser?: string;
+  bombExplodedTick?: number;
+}
+export interface Highlight {
+  id: string;
+  player: { steamid: string; name: string };
+  round: number;
+  startTick: number;
+  endTick: number;
+  anchorTick: number;
+  keyMoments?: [number, number][];
+  roundResult?: { fromTick: number; player: string };
+  score: number;
+  tags: string[];
+  title: string;
+  kills: KillEvent[];
+  breakdown: Record<string, number>;
+}
+export type TeamKey = 'A' | 'B';
+export interface AimStats {
+  shots: number; hits: number; headHits: number; headEligibleHits: number;
+  firstShots: number; firstHits: number; sprayShots: number; sprayHits: number;
+}
+export interface RecoilPoint { x: number; y: number; samples: number }
+export interface RecoilShot { tick: number; origin: [number, number, number]; viewPitch: number; viewYaw: number }
+export interface RecoilFrame { tick: number; eye: [number, number, number]; view: [number, number]; targets: { id: string; position: [number, number, number] }[] }
+export interface RecoilContact { tick: number; targetId: string; kill: boolean }
+export interface RecoilBurst { round: number; startTick: number; shots: RecoilShot[]; tracking?: RecoilFrame[]; contacts?: RecoilContact[] }
+export interface PlayerStats {
+  steamid: string;
+  name: string;
+  team: TeamKey;
+  kills: number;
+  deaths: number;
+  assists: number;
+  openingKills: number;
+  openingDeaths: number;
+  flashAssists: number;
+  roundsPlayed: number;
+  roundsSurvived: number;
+  kast: number;
+  tradeKills: number;
+  tradedDeaths: number;
+  heDamage: number;
+  fireDamage: number;
+  opponents: Record<string, number>;
+  aim: Record<string, AimStats>;
+  recoil: Record<string, RecoilBurst[]>;
+  activity: { shots: number; flashes: number; smokes: number; hes: number; fires: number; enemiesFlashed: number; teammatesFlashed: number; enemyBlindSeconds: number };
+  clutches: { round: number; side: Team; versus: number; kills: number; outcome: 'won' | 'saved' | 'lost' }[];
+  headshots: number;
+  headshotPct: number;
+  kd: number;
+  multiKills: Record<'2k' | '3k' | '4k' | '5k', number>;
+  clutchesWon: number;
+  damage: number;
+  utilityDamage: number;
+  friendlyDamage: number;
+  adr: number;
+  highlights: number;
+  bestScore: number;
+}
+export interface RoundSummary {
+  players?: Record<string, { kills: number; deaths: number; damage: number; awp: number; flashed: number; cash?: number | null }>;
+  round: number;
+  winner?: TeamKey;
+  reason: string;
+  startTick: number;
+  endTick: number;
+  killsA: number;
+  killsB: number;
+  bombPlanted: boolean;
+}
+export interface ParsedDemo {
+  discoveryCandidates?: DiscoveryCandidate[];
+  demoDigest?: string;
+  demoEndTick?: number;
+  recordedDeaths?: RecordedDeath[];
+  recoilReference?: Record<string, RecoilPoint[]>;
+  info: DemoInfo;
+  rounds: RoundInfo[];
+  highlights: Highlight[];
+  stats: PlayerStats[];
+  score: { A: number; B: number };
+  roundSummaries: RoundSummary[];
+  parsedAt: string;
+}
+export interface DiscoveryCandidate {
+  id: string; sourceDigest: string; playerId: string; round: number; startTick: number; endTick: number; anchorTick: number;
+  category: 'whiff_candidate'|'exceptional_shot'|'combat'|'death'|'utility_mistake'|'tension';
+  title: string; tags: string[]; origins: string[]; requiresVisualReview: boolean;
+  evidence: {eventId: string; tick: number; kind: string; weapon?: string; value?: number; targetId?: string}[];
+}
+
+// ---- 2D replay (crates/demodesk-core/src/replay.rs + radar.rs) ----
+
+export interface ReplayPlayer {
+  steamid: string;
+  name: string;
+}
+/** `p` rows: [pid, x, y, z, yaw, hp, armor, flags, weapon, money, ...inventory]; weapon/inventory index ReplayData.weapons. */
+export interface ReplayFrame {
+  t: number;
+  p: number[][];
+  g?: number[][];
+  /** Dropped equipment: [entityId, weapon, x, y, z], replay schema 7+. */
+  d?: number[][];
+  /** Active fire-cell world coordinates, replay schema 5+. */
+  f?: number[][];
+}
+export interface ReplayEvent {
+  t: number;
+  k: 'shot' | 'smoke' | 'smokeEnd' | 'flash' | 'he' | 'fire' | 'fireEnd' | 'decoy' | 'decoyEnd' | 'plant' | 'defuseStart' | 'defuseAbort' | 'defuse' | 'explode' | 'bombDrop' | 'bombPickup' | 'death';
+  x?: number;
+  y?: number;
+  z?: number;
+  p?: number;
+  a?: number;
+  yaw?: number;
+  id?: number;
+  kit?: boolean;
+}
+export interface ReplayData {
+  schemaVersion: number;
+  tickRate: number;
+  step: number;
+  firstTick: number;
+  lastTick: number;
+  players: ReplayPlayer[];
+  weapons: string[];
+  frames: ReplayFrame[];
+  events: ReplayEvent[];
+  smoke?: {t:number; cells:number[][] | null}[];
+}
+export const FLAG = { alive: 1, helmet: 2, defuser: 4, blind: 8, bomb: 16, scoped: 32, ducking: 64, walking: 128, defusing: 256 } as const;
+export const GRENADE_KINDS = ['smoke', 'flash', 'he', 'molotov', 'decoy'] as const;
+
+export interface MapLayer {
+  name: string;
+  image: string;
+  /** absolute path of the png */
+  path: string;
+  altitudeMin: number;
+  altitudeMax: number;
+}
+export interface MapAssets {
+  schemaVersion: number;
+  patchVersion?: number;
+  mapName: string;
+  dir: string;
+  posX: number;
+  posY: number;
+  scale: number;
+  layers: MapLayer[];
+}
+
+export type DemoStatus = 'new' | 'queued' | 'validating' | 'parsing' | 'parsed' | 'error';
+export interface DemoMeta {
+  id: string;
+  name: string;
+  path: string;
+  bytes: number;
+  mtimeMs: number;
+  createdMs: number;
+  matchTimeMs?: number;
+  status: DemoStatus;
+  error?: string;
+  mapName?: string;
+  parsedAt?: string;
+  summary?: { rounds: number; kills: number; highlights: number; scoreA: number; scoreB: number; players: string[] };
+}
+
+export type Camera = 'slot' | 'lock';
+export interface RenderOptions {
+  fps: number;
+  width: number;
+  height: number;
+  codec: string;
+  crf: number;
+  container: string;
+  camera: Camera;
+  deathNoticeSeconds: number;
+  /** base interface (health, ammo, score, crosshair…); the rest are separate elements */
+  hud: boolean;
+  /** crosshair; CS2 can only draw it while `hud` is on */
+  crosshair: boolean;
+  radar: boolean;
+  killFeed: boolean;
+  chat: boolean;
+  viewmodel: boolean;
+  tracers: boolean;
+  hudScale: number;
+  trueView: boolean;
+  xray: boolean;
+  voice: boolean;
+  showGame: boolean;
+  quitWhenDone: boolean;
+  keepRawFiles: boolean;
+  /** join all clips into one video; the size limit then applies to that file */
+  merge: boolean;
+  keyMomentsOnly: boolean;
+  roundResultLabel: string;
+  maxSizeMb: number | null;
+  audioKbps: number;
+  extraLaunchOptions: string[];
+}
+export const RENDER_QUALITY: Record<string, number> = { libx264: 19, libx265: 20, h264_nvenc: 20, hevc_nvenc: 20, h264_amf: 18, hevc_amf: 18 };
+
+export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
+  fps: 60,
+  width: 3840,
+  height: 2160,
+  codec: 'h264_amf',
+  crf: RENDER_QUALITY.h264_amf ?? 18,
+  container: 'mp4',
+  camera: 'lock',
+  deathNoticeSeconds: 5,
+  hud: true,
+  crosshair: true,
+  radar: true,
+  killFeed: true,
+  chat: true,
+  viewmodel: true,
+  tracers: true,
+  hudScale: 0.85,
+  trueView: false,
+  xray: false,
+  voice: true,
+  showGame: false,
+  quitWhenDone: true,
+  keepRawFiles: false,
+  merge: false,
+  keyMomentsOnly: true,
+  roundResultLabel: "Round result",
+  maxSizeMb: null,
+  audioKbps: 192,
+  extraLaunchOptions: [],
+};
+
+export type JobStatus = 'queued' | 'running' | 'done' | 'partial' | 'error' | 'cancelled';
+export interface JobOutput {
+  file: string;
+  bytes: number;
+  highlightId?: string;
+  title: string;
+  isFinal: boolean;
+}
+export interface ClipMedia {
+  outputKey: string;
+  width: number;
+  height: number;
+  fps: number;
+  durationSeconds: number;
+  posterPath?: string;
+}
+export interface AnalysisClipSelection {playerId:string;assessmentId:string;ruleIds:string[]}
+export interface RuleClips {ruleId:string;title:string;demoFingerprint:string;highlights:Highlight[]}
+export interface RenderJob {
+  errorCode?: ErrorCode;
+  schemaVersion?: number;
+  id: string;
+  demoId: string;
+  highlightIds: string[];
+  analysisClips?: RuleClips;
+  sourceSnapshot?: { demoPath: string; fingerprint: string; demoInfo: DemoInfo; highlights: Highlight[] };
+  retryOf?: string;
+  completed?: number;
+  total?: number;
+  options: RenderOptions;
+  status: JobStatus;
+  stage?: string;
+  progress?: number;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+  outputs: JobOutput[];
+  failedHighlights?: string[];
+  log: string[];
+}
+
+export interface ToolPaths {
+  steamDir?: string;
+  cs2Dir?: string;
+  cs2Exe?: string;
+  cs2PatchVersion?: number;
+  hlaeExe?: string;
+  hlaeDll?: string;
+  ffmpegExe?: string;
+  vrfExe?: string;
+}
+export interface DoctorReport {
+  ok: boolean;
+  problems: string[];
+  paths: ToolPaths;
+}
+export interface Settings {
+  renderDefaults?: RenderOptions;
+  /** UI language code, or null = follow the system language */
+  language: string | null;
+  cs2Dir: string | null;
+  steamDir: string | null;
+  replayFolders: string[];
+  scanGameReplays: boolean;
+  hlaeExe: string | null;
+  ffmpegExe: string | null;
+  vrfExe: string | null;
+}
+export interface ToolCheck {
+  ok: boolean;
+  path: string | null;
+  installedRelease: string | null;
+  checkedAt: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  stdout: string;
+  stderr: string;
+  error: string | null;
+}
+export interface ToolUpdate { installed: string | null; latest: string }
+export interface SettingsResponse {
+  toolChecks: Partial<Record<'hlae' | 'ffmpeg' | 'vrf', ToolCheck>>;
+  dataDirOverride: string | null;
+  defaultDataDir: string;
+  restartRequired: boolean;
+  settings: Settings;
+  detected: { steamDir?: string; cs2Dir?: string; replaysDir?: string };
+  doctor: DoctorReport;
+  setup: Partial<Record<'hlae' | 'ffmpeg' | 'vrf', { running: boolean; stopping?: boolean; log: string[]; progress: string | null }>>;
+  dataDir: string;
+}
+export interface StorageBytes {
+  parsedBytes: number;
+  anomalyBytes: number;
+  clipsBytes: number;
+  radarBytes: number;
+}
+export interface Status {
+  ok: boolean;
+  missingRenderTools: ('Steam' | 'CS2' | 'HLAE' | 'ffmpeg')[];
+  problems: string[];
+  dataDir: string;
+  activeRender: string | null;
+  version: string;
+}
+
+export type ScoringStep = 1 | 2 | 3;
+
+export interface AnalysisJob {
+  id:string; demoId:string; sequence:number; revision:number; status:'queued'|'running'|'done'|'error';
+  phase?:'waiting-for-compute'|'preparing'|'analyzing'|'saving';
+  step:ScoringStep|null; error:string|null; createdAt:string; startedAt:string|null; finishedAt:string|null;
+}
+
+export type AppEvent =
+  | { type: 'analysis-job-changed'; job: AnalysisJob }
+  | { type: 'scoring-progress'; id: string; step: ScoringStep }
+  | { type: 'demo-changed'; demo: DemoMeta }
+  | { type: 'job-changed'; job: RenderJob }
+  | { type: 'setup-progress'; tool: 'hlae' | 'ffmpeg' | 'vrf'; progress: string }
+  | { type: 'setup-finished'; tool: 'hlae' | 'ffmpeg' | 'vrf'; ok: boolean; installed: boolean; cancelled: boolean; error: string | null };
+
+export type AssessmentState = 'passed' | 'findings' | 'unavailable' | 'failed';
+export interface MatchAssessment {
+  sourceFingerprint: string;
+  players: Record<string, Assessment[]>;
+  preparationSeconds: number;
+  analysisSeconds: number;
+  sharedBytes: number;
+  genericBytes: number;
+  diagnosticBytes: number;
+}
+export interface AnalysisMeasurement {
+  name: string; value: number; unit: string; threshold: number | null;
+}
+export interface BehaviorOccurrence {
+  id: string; round: number; startTick: number; endTick: number;
+  targetId: string; sourceIds: string[]; measurements: AnalysisMeasurement[];
+}
+export interface ScoringFinding {
+  id: string; group: string; round: number; startTick: number; endTick: number;
+  targetId: string; reason: string; measurements: AnalysisMeasurement[];
+}
+export interface BehaviorCheck {
+  definition: { id: string; version: string; name: string; description: string; category: string; parameters: unknown };
+  state: AssessmentState; reason: string; reasonCode: string; evaluatedSamples: number;
+  occurrences: BehaviorOccurrence[]; summary: AnalysisMeasurement[];
+  observations?: ScoringFinding[]; findings?: ScoringFinding[]; diagnostics: unknown;
+}
+export interface Assessment {
+  schemaVersion: number; id: string; createdAt: string; demoId: string; demoFingerprint: string;
+  playerId: string; tickRate: number; rulesetVersion: string; state: AssessmentState;
+  checks: BehaviorCheck[];
+}
+export interface AssessmentHistory { sourceFingerprint: string | null; records: Assessment[] }
+
+// ---- commands ----
+
+export type UpdateStatus = { status: 'storeCurrent' | 'storeAvailable' | 'current' } | { status: 'available'; version: string };
+
+export const api = {
+  retryRender: (jobId: string) => invoke<RenderJob>('retry_render_job', { jobId }),
+  openRenderSource: (jobId: string) => invoke<DemoMeta>('open_render_source', { jobId }),
+  clipMedia: (jobId: string, outputKey: string) => invoke<ClipMedia>('get_clip_media', { jobId, outputKey }),
+  cancelClipMedia: (jobId: string, outputKey: string) => invoke<void>('cancel_clip_media', { jobId, outputKey }),
+  browseDirectory: (path: string | null) => invoke<string>('browse_directory', { path }),
+  checkForUpdates: () => invoke<UpdateStatus>('check_for_updates'),
+  startupError: () => invoke<string | null>('get_startup_error'),
+  preferencesNeedReset: () => invoke<boolean>('preferences_need_reset'),
+  acknowledgePreferencesReset: () => invoke<void>('acknowledge_preferences_reset'),
+  retryStartup: () => invoke<void>('retry_startup'),
+  recoverDataDirectory: (path: string | null) => invoke<void>('recover_data_directory', { path }),
+  status: () => invoke<Status>('get_status'),
+  storageBytes: () => invoke<StorageBytes>('get_storage_bytes'),
+  settings: () => invoke<SettingsResponse>('get_settings'),
+  previewSettings: (settings: Settings, originalSettings: Settings, dataDirOverride: string | null) => invoke<{ target: string; restartRequired: boolean }>('preview_settings', { settings, originalSettings, dataDirOverride }),
+  saveSettings: (settings: Settings, dataDirOverride: string | null, originalSettings: Settings, changeConfirmed = false) => invoke<SettingsResponse>('save_settings', { settings, originalSettings, dataDirOverride, changeConfirmed }),
+  runSetup: (tool: 'hlae' | 'ffmpeg' | 'vrf', force = false, directory: string | null = null) => invoke<boolean>('run_setup', { tool, force, directory }),
+  cancelSetup: (tool: 'hlae' | 'ffmpeg' | 'vrf') => invoke<void>('cancel_setup', { tool }),
+  checkTools: () => invoke<SettingsResponse>('check_tools'),
+  toolDiagnostics: () => invoke<string>('tool_diagnostics'),
+  checkToolUpdate: (tool: 'hlae' | 'ffmpeg' | 'vrf') => invoke<ToolUpdate>('check_tool_update', { tool }),
+  demos: () => invoke<DemoMeta[]>('list_demos'),
+  registerDemo: (path: string) => invoke<DemoMeta>('register_demo', { path }),
+  parse: (id: string) => invoke<void>('parse_demo', { id }),
+  demo: (id: string) => invoke<{ meta: DemoMeta; parsed?: ParsedDemo }>('get_demo', { id }),
+  scoringHistory: (id: string) => invoke<Record<string, Assessment[]>>('scoring_history', { id }),
+  analysisJobs: () => invoke<AnalysisJob[]>('analysis_jobs'),
+  scoreMatch: (id: string, force = true) => invoke<AnalysisJob>('score_match', { id, force }),
+  kills: (id: string) => invoke<KillEvent[]>('get_kills', { id }),
+  replay: async (id: string): Promise<ReplayData> => {
+    const f = await invoke<{ path: string; bytes: number }>('get_replay', { id });
+    const worker = new Worker(new URL('./replay/load.worker.ts', import.meta.url), { type: 'module' });
+    try {
+      return await new Promise<ReplayData>((resolve, reject) => {
+        worker.onmessage = (event: MessageEvent<{ data: ReplayData } | { error: string }>) => {
+          if ('error' in event.data) reject(new Error(event.data.error));
+          else resolve(event.data.data);
+        };
+        worker.onerror = event => reject(new Error(event.message || 'Replay worker failed'));
+        worker.onmessageerror = () => reject(new Error('Replay worker response could not be read'));
+        worker.postMessage(convertFileSrc(f.path));
+      });
+    } finally {
+      worker.terminate();
+    }
+  },
+  mapAssets: (mapName: string) => invoke<MapAssets>('get_map_assets', { mapName }),
+  clearRadar: () => invoke<number>('clear_radar'),
+  clearMatchAnomaly: (id: string) => invoke<void>('clear_match_anomaly', { id }),
+  clearAnalysis: (id: string) => invoke<void>('clear_analysis', { id }),
+  clearAnomalyData: () => invoke<number>('clear_anomaly_data'),
+  clearAllAnalysis: () => invoke<number>('clear_all_analysis'),
+  clearAllClips: () => invoke<number>('clear_all_clips'),
+  removeDemo: (id: string) => invoke<void>('remove_demo', { id }),
+  analysisClips: (demoId:string,selection:AnalysisClipSelection,merge=false)=>invoke<RuleClips[]>('analysis_clips',{demoId,selection,merge}),
+  renderAnalysis: (demoId:string,selection:AnalysisClipSelection,options:RenderOptions)=>invoke<RenderJob[]>('start_analysis_render',{demoId,selection,options}),
+  render: (demoId: string, highlightIds: string[], options: RenderOptions) => invoke<RenderJob>('start_render', { demoId, highlightIds, options }),
+  jobs: () => invoke<RenderJob[]>('list_jobs'),
+  cancel: (id: string) => invoke<boolean>('cancel_job', { id }),
+  deleteJob: (id: string) => invoke<void>('delete_job', { id }),
+  reveal: (path: string) => invoke<void>('reveal_path', { path }),
+  open: (path: string) => invoke<void>('open_path', { path }),
+  openUrl: (url: string) => invoke<void>('open_url', { url }),
+  onEvent: (handler: (e: AppEvent) => void): Promise<UnlistenFn> => listen<AppEvent>('demodesk://event', (ev) => handler(ev.payload)),
+  fileSrc: (path: string) => convertFileSrc(path),
+};
+
+export const mb = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+/** m:ss from a number of seconds (rounded down). */
+export const mmss = (seconds: number): string => {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+export const clock = (ticks: number, tickRate: number): string => mmss(ticks / tickRate);
+export const errorText = (e: unknown): string => translateError(e instanceof Error ? e.message : typeof e === 'string' ? e : JSON.stringify(e));

@@ -1,0 +1,93 @@
+# CS DemoDesk
+
+[English](README.md) | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | 한국어 | [Русский](README.ru.md)
+
+Counter-Strike 2를 위한 Windows용 Demo 관리·분석 도구입니다. 플레이어 통계, 2D 리플레이와 실험적 이상 데이터를 확인하고 하이라이트나 의심스러운 장면을 영상으로 내보낼 수 있습니다.
+
+## 다운로드
+
+- **[Microsoft Store](https://apps.microsoft.com/detail/9N5G4VXSDGS5)** — Microsoft Store에서 설치하고 자동 업데이트를 받을 수 있습니다.
+- **[포터블 EXE](https://github.com/noih/cs-demodesk/releases/latest)** — GitHub Releases에서 `.exe` 다운로드. 설치 불필요.
+
+## 사용 전 안내
+
+- CS2 업데이트 후 내보내기에 실패하면 설정에서 HLAE를 다시 다운로드하면 대부분 해결됩니다.
+- 녹화 중에는 플레이할 수 없습니다. 여러 내보내기는 순서대로 실행됩니다.
+- 채팅 앱이나 브라우저 재생에는 H.264를 권장합니다. NVIDIA 인코딩에는 NVIDIA GPU가 필요합니다.
+
+## 기능
+
+### 매치 스탯
+
+교전, 유틸리티 사용, 다양한 라운드 상황을 바탕으로 경기 결과와 플레이어의 활약을 살펴봅니다. 비교 차트, 라운드별 추이, 반동 제어 궤적으로 경기를 여러 관점에서 돌아볼 수 있습니다.
+
+![AK-47, M4A4, M4A1-S의 반동 제어 궤적](docs/images/ko/03-combat-analysis.png)
+
+### 이상 데이터 (실험적 기능)
+
+모든 플레이어의 조준, 사격, 이동 행동을 집계하고 TTD, 추정 연막 관통 명중률 등의 통계를 확인할 수 있습니다. 플레이어와 행동 항목별로 의심스러운 클립을 선택·병합·내보내 자세히 검토할 수 있습니다.
+
+통계는 참고용이며 부정행위 판정이 아닙니다. 의도적으로 숨겨 통계에 이상이 드러나지 않는 치트는 식별할 수 없으며, 이상이 없다고 부정행위가 없다는 뜻은 아닙니다.
+
+![이상 데이터 (실험적 기능)](docs/images/ko/05-anomaly-data.png)
+
+### 하이라이트 영상
+
+- 하이라이트 (멀티킬, 클러치, 닌자 디퓨즈) 를 자동으로 찾아 점수를 매김
+- 선택한 클립을 백그라운드의 CS2 로 녹화하고 FFmpeg 로 인코딩
+- 해상도, FPS, H.264 / H.265, CPU 또는 NVIDIA
+- HUD 요소별 표시 전환, 하나의 영상으로 합치기
+- 채팅 앱 공유용 파일 크기 제한 (10 / 20 / 50 MB)
+
+![하이라이트 점수 상세 정보](docs/images/ko/04-highlights.png)
+
+### 2D 리플레이
+
+- 플레이어 위치, 시야 방향, 체력, 방탄복, 무기, 소지금
+- 투척 무기, 스모크 / 화염 / 섬광 범위, C4 와 해체 카운트다운, 킬 피드, 가청 범위
+- 라운드 이동, 재생 속도, 플레이어 따라가기
+- 여러 층 맵은 층마다 패널로 표시. 레이더 이미지는 로컬 게임 파일에서 추출
+
+![2D 리플레이](docs/images/ko/07-2d-view.png)
+
+## 설계
+
+### 게임 파일 읽기 전용 접근
+
+게임 폴더에는 아무것도 쓰지 않습니다. 플러그인, 스크립트, cfg 추가도, 게임 파일 변경도 없습니다. 녹화는 [HLAE](https://github.com/advancedfx/advancedfx) 를 통해 `-insecure` 로 별도의 CS2 프로세스를 띄우고 (HLAE 를 직접 쓰는 것과 동일), 게임 내장 netcon 콘솔로 명령을 보내며, 게임 설정은 별도의 `USRLOCALCSGO` 폴더에 두므로 플레이어 본인의 설정은 그대로입니다. 서드파티 도구는 모두 앱 자체 데이터 폴더에 다운로드됩니다.
+
+| 도구 | 용도 | 출처 |
+| --- | --- | --- |
+| HLAE | 녹화 (mirv_streams) | [advancedfx/advancedfx](https://github.com/advancedfx/advancedfx) |
+| FFmpeg | 인코딩, 합치기, 크기 제한 | [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (GPL) |
+| Source 2 Viewer CLI | vpk 에서 레이더 이미지 추출 | [ValveResourceFormat](https://github.com/ValveResourceFormat/ValveResourceFormat) (MIT) |
+| demoparser | 데모 파싱 (vendored) | [LaihoE/demoparser](https://github.com/LaihoE/demoparser) (MIT) |
+
+### 파일 기반 저장
+
+데이터베이스를 사용하지 않습니다. 설정, 내보내기 작업, 분석 캐시는 기본적으로 사용자 홈 폴더 아래의 `%USERPROFILE%\.noih\demodesk-data`에 파일로 저장되며, 설정에서 데이터 폴더를 변경할 수 있습니다. 데모는 원래 위치에 유지되며 개별적으로 추가하거나 지정 폴더를 검색해 불러올 수 있습니다.
+
+## 빌드
+
+[Rust](https://rustup.rs) (stable) 와 Visual Studio Build Tools (C++ 를 사용한 데스크톱 개발), Node.js 24.20.0 (`.nvmrc`), WebView2 (Windows 내장) 가 필요합니다.
+
+```powershell
+npm install
+npm run app:dev      # 개발: Vite + Tauri 창
+npm run app:build    # dist-portable\CS-DemoDesk-<version>.exe
+npm run test:core    # Rust 단위 테스트
+```
+
+## 릴리스
+
+릴리스는 [GitHub Actions](.github/workflows/release.yml) 로 빌드되며 build provenance 증명이 붙습니다. 다운로드한 파일이 이 저장소에서 빌드되었는지 확인하려면:
+
+```powershell
+gh attestation verify CS-DemoDesk-<version>.exe --owner noih
+```
+
+## 라이선스
+
+Copyright (C) 2026 NOIH - <https://github.com/noih>
+
+[GNU AGPL-3.0](LICENSE). 서드파티 구성 요소는 각자의 라이선스를 따릅니다 (위 표 참고. vendored 된 demoparser 는 `vendor/demoparser/LICENSE` 에 MIT 라이선스를 유지).

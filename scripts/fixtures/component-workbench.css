@@ -1,0 +1,11 @@
+/* Layout belongs to this component test workbench, not to the shipped studio. */
+.component-workbench { display:grid;grid-template-columns:300px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);height:100vh;min-height:0; }
+.component-workbench .app-header { grid-column:1/-1;display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:12px;border-bottom:1px solid var(--app-border); }
+.component-workbench .header-tools { flex:1;min-width:0; }
+.component-workbench > .sidebar { display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;border-right:1px solid var(--app-border); }
+.component-workbench > .main { display:flex;flex-direction:column;overflow:auto;min-height:0;min-width:0;padding:16px 20px 24px; }
+.component-workbench .studio-match-tabs { display:flex;align-items:flex-start;gap:8px; }
+.component-workbench .demo-tabs { flex:1;min-width:0; }
+.component-workbench .font-size-control { display:flex;gap:12px; }
+.component-workbench .font-size-control label { display:flex;align-items:center;gap:4px; }
+@media(max-width:1000px) { .component-workbench { grid-template-columns:240px minmax(0,1fr); } }

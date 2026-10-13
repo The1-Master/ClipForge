@@ -1,0 +1,368 @@
+//! Data contracts shared by every stage (parse → detect → render) and with the
+//! frontend (serialized as camelCase JSON). Everything time-related is in demo
+//! ticks so any render backend can align exactly.
+
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+pub type SteamId = String;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash, PartialOrd, Ord)]
+pub enum Team {
+    #[serde(rename = "CT")]
+    Ct,
+    #[serde(rename = "TERRORIST")]
+    T,
+}
+
+impl Team {
+    pub fn enemy(self) -> Team {
+        match self {
+            Team::Ct => Team::T,
+            Team::T => Team::Ct,
+        }
+    }
+    pub fn from_name(name: &str) -> Team {
+        if name == "CT" {
+            Team::Ct
+        } else {
+            Team::T
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerInfo {
+    pub name: String,
+    pub steamid: SteamId,
+    /// 2 = T, 3 = CT as recorded at demo start (teams swap at halftime)
+    pub team_number: i32,
+    /// In-game user id; the CS2 `spec_player` slot is user_id + 1
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DemoInfo {
+    pub path: String,
+    pub map_name: String,
+    pub server_name: String,
+    /// Ticks per second. Valve MM demos are 64.
+    pub tick_rate: f64,
+    pub players: Vec<PlayerInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attacker {
+    pub steamid: SteamId,
+    pub name: String,
+    pub team: Team,
+    pub health: i32,
+    pub weapon_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Victim {
+    pub steamid: SteamId,
+    pub name: String,
+    pub team: Team,
+    pub weapon_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Assister {
+    pub steamid: SteamId,
+    pub name: String,
+    pub team: Team,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KillEvent {
+    pub tick: i32,
+    /// 0-based round index as reported by total_rounds_played at kill time
+    pub round: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attacker: Option<Attacker>,
+    pub victim: Victim,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assister: Option<Assister>,
+    /// weapon class name e.g. "ak47", "usp_silencer", "knife", "taser"
+    pub weapon: String,
+    pub headshot: bool,
+    pub noscope: bool,
+    /// number of surfaces penetrated (wallbang when > 0)
+    pub penetrated: i32,
+    pub thru_smoke: bool,
+    pub attacker_blind: bool,
+    pub attacker_in_air: bool,
+    pub assisted_flash: bool,
+    pub distance: f64,
+    pub hitgroup: String,
+    pub is_freeze_period: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoundInfo {
+    /// 1-based round number as reported by the round_end event
+    pub round: i32,
+    pub start_tick: i32,
+    pub freeze_end_tick: i32,
+    pub end_tick: i32,
+    pub officially_ended_tick: i32,
+    /// None = unknown winner
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub winner: Option<Team>,
+    pub reason: String,
+    /// Roster at freeze end: steamid -> team
+    pub roster: BTreeMap<SteamId, Team>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bomb_planted_tick: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bomb_defused_tick: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bomb_defuser: Option<SteamId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bomb_exploded_tick: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DemoData {
+    /// SHA-256 of the original demo bytes; identities survive file renames.
+    #[serde(default)]
+    pub demo_digest: String,
+    #[serde(default)]
+    pub demo_end_tick: i32,
+    /// Reusable normalized game events collected in the existing event parse pass.
+    #[serde(default)]
+    pub event_ledger: Vec<DiscoveryEvent>,
+    #[serde(default)]
+    pub event_ledger_version: u32,
+    /// Every recorded death, including warmup, self/world and post-match events.
+    #[serde(default)]
+    pub recorded_deaths: Vec<RecordedDeath>,
+    #[serde(default)]
+    pub clutch_ineligible_rounds: Vec<i32>,
+    #[serde(default)]
+    pub round_metrics: BTreeMap<i32, BTreeMap<SteamId, RoundMetrics>>,
+    pub info: DemoInfo,
+    pub kills: Vec<KillEvent>,
+    pub rounds: Vec<RoundInfo>,
+    /// Damage dealt to enemies, per attacker steamid (from player_hurt)
+    #[serde(default)]
+    pub damage: BTreeMap<SteamId, DamageTotals>,
+    /// Enemy damage dealt or received, independent of weapon or whether it was lethal.
+    #[serde(default)]
+    pub damage_ticks: BTreeMap<SteamId, Vec<i32>>,
+    #[serde(default)]
+    pub activity: BTreeMap<SteamId, ActivityStats>,
+    #[serde(default)]
+    pub aim: BTreeMap<SteamId, BTreeMap<String, crate::aim::AimStats>>,
+    #[serde(default)]
+    pub recoil: BTreeMap<SteamId, BTreeMap<String, Vec<crate::aim::RecoilBurst>>>,
+    #[serde(default)]
+    pub recoil_reference: BTreeMap<String, Vec<crate::aim::RecoilPoint>>,
+}
+
+/// Factual discovery input. Missing geometry/visibility stays unknown; a shot with
+/// no recorded damage is never itself an assertion of a whiff.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryEvent {
+    pub id: String,
+    pub tick: i32,
+    pub round: i32,
+    pub kind: String,
+    pub player_id: SteamId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<SteamId>,
+    pub weapon: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    pub relation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryEvidence {
+    pub event_id: String,
+    pub tick: i32,
+    pub kind: String,
+    pub weapon: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<SteamId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryCandidate {
+    pub id: String,
+    pub source_digest: String,
+    pub player_id: SteamId,
+    pub round: i32,
+    pub start_tick: i32,
+    pub end_tick: i32,
+    pub anchor_tick: i32,
+    pub category: String,
+    pub title: String,
+    pub tags: Vec<String>,
+    pub origins: Vec<String>,
+    pub evidence: Vec<DiscoveryEvidence>,
+    pub requires_visual_review: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewWindow {
+    pub round: i32,
+    pub start_tick: i32,
+    pub end_tick: i32,
+    pub candidate_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewPlan {
+    pub schema_version: u32,
+    pub mode: String,
+    pub coverage_scope: String,
+    pub candidates: Vec<DiscoveryCandidate>,
+    pub windows: Vec<ReviewWindow>,
+    pub preview_seconds: f64,
+    pub full_match_seconds: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordedDeath {
+    pub id: String,
+    pub kill: KillEvent,
+    /// competitive / post-round / warmup / post-match / freeze / unknown
+    pub phase: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub round_number: Option<i32>,
+    /// Recorded conditions, rather than an assertion that a death was funny.
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DamageTotals {
+    /// Actual health damage to teammates, excluding self damage.
+    #[serde(default)]
+    pub friendly: u32,
+    /// health damage to enemies, all weapons
+    pub total: u32,
+    /// share of `total` done by grenades / molotov fire
+    pub utility: u32,
+    pub he: u32,
+    pub fire: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HighlightPlayer {
+    pub steamid: SteamId,
+    pub name: String,
+}
+
+/// Explicit context shot after the highlighted player dies; never their first-person POV.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoundResultView {
+    pub from_tick: i32,
+    pub player: SteamId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Highlight {
+    pub id: String,
+    /// Whose POV to render
+    pub player: HighlightPlayer,
+    pub round: i32,
+    /// Inclusive tick window to render (already padded with lead-in / lead-out)
+    pub start_tick: i32,
+    pub end_tick: i32,
+    /// Tick of the first notable action
+    pub anchor_tick: i32,
+    /// Padded key-event windows. Empty for legacy and analysis clips (keep full window).
+    #[serde(default)]
+    pub key_moments: Vec<[i32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub round_result: Option<RoundResultView>,
+    pub score: f64,
+    pub tags: Vec<String>,
+    /// Human readable summary e.g. "Player A — 3K (2 HS, clutch) 1v3 won · R13"
+    pub title: String,
+    pub kills: Vec<KillEvent>,
+    /// Per-rule score contributions, for tuning
+    pub breakdown: BTreeMap<String, f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DetectOptions {
+    /// Restrict to these players (steamids). Empty = everyone.
+    pub players: Vec<SteamId>,
+    pub lead_in_seconds: f64,
+    pub lead_out_seconds: f64,
+    pub min_score: f64,
+    pub top_n: usize,
+    pub include_deaths: bool,
+}
+
+impl Default for DetectOptions {
+    fn default() -> Self {
+        Self {
+            players: vec![],
+            lead_in_seconds: 5.0,
+            lead_out_seconds: 3.0,
+            min_score: 1.0,
+            top_n: 0, // Zero means all scored candidates; deaths are never capped.
+            include_deaths: true,
+        }
+    }
+}
+
+pub fn seconds_to_ticks(seconds: f64, tick_rate: f64) -> i32 {
+    (seconds * tick_rate).round() as i32
+}
+
+pub fn format_clock(ticks: i32, tick_rate: f64) -> String {
+    let total = (ticks.max(0) as f64 / tick_rate).floor() as i64;
+    format!("{}:{:02}", total / 60, total % 60)
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityStats {
+    pub shots: u32,
+    pub flashes: u32,
+    pub smokes: u32,
+    pub hes: u32,
+    pub fires: u32,
+    pub enemies_flashed: u32,
+    pub teammates_flashed: u32,
+    pub enemy_blind_seconds: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoundMetrics {
+    pub cash: Option<u32>,
+    pub kills: u32,
+    pub deaths: u32,
+    pub awp: u32,
+    pub damage: u32,
+    pub flashed: u32,
+}

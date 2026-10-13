@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"/><title>ClipForge player verification</title><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body><main id="root"></main><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {AppTheme} from '../../src/AppTheme.tsx';
+import {ClipPlayer} from '../../src/components/studio/ClipPlayer.tsx';
+import '@radix-ui/themes/styles.css';
+import '../../src/styles.css';
+const root=createRoot(document.getElementById('root'));
+function render(src){root.render(React.createElement(React.StrictMode,null,React.createElement(AppTheme,null,React.createElement('div',{className:'studio-page'},React.createElement('h1',null,'Clip playback'),React.createElement(ClipPlayer,{src,title:'Verification clip'}),React.createElement('span',{className:'app-spinner',role:'status','aria-label':'Preparing'})))));}
+window.switchPlayerSource=src=>render(src);
+window.unmountPlayer=()=>root.unmount();
+render('/__player-video.mp4');
+</script></body></html>

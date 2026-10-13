@@ -1,0 +1,8 @@
+ClipForge private contribution receiver
+Copyright 2026 ClipForge contributors.
+License: AGPL-3.0-only; see the parent application's LICENSE.
+This is new ClipForge code in the CS DemoDesk-derived application; upstream
+copyright, provenance, and other notices remain in the parent distribution.
+
+Runtime dependency: Gunicorn 26.2.0, MIT license,
+https://github.com/benoitc/gunicorn (install package includes its license).
